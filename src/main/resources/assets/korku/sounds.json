@@ -1,0 +1,76 @@
+{
+  "ambient.drone": {
+    "sounds": [
+      {
+        "name": "korku:amb_drone",
+        "stream": true
+      }
+    ]
+  },
+  "heartbeat.slow": {
+    "sounds": [
+      "korku:heartbeat_slow"
+    ]
+  },
+  "heartbeat.fast": {
+    "sounds": [
+      "korku:heartbeat_fast"
+    ]
+  },
+  "jumpscare": {
+    "sounds": [
+      "korku:jumpscare"
+    ]
+  },
+  "step": {
+    "sounds": [
+      "korku:step1",
+      "korku:step2",
+      "korku:step3",
+      "korku:step4"
+    ]
+  },
+  "step.walk": {
+    "sounds": [
+      "korku:walk_approach"
+    ]
+  },
+  "monster.growl": {
+    "sounds": [
+      "korku:monster_growl"
+    ]
+  },
+  "monster.roar": {
+    "sounds": [
+      "korku:monster_roar"
+    ]
+  },
+  "event.thin": {
+    "sounds": [
+      "korku:event_thin"
+    ]
+  },
+  "event.medium": {
+    "sounds": [
+      "korku:event_medium"
+    ]
+  },
+  "event.thick": {
+    "sounds": [
+      "korku:event_thick"
+    ]
+  },
+  "monster.step": {
+    "sounds": [
+      "korku:step1",
+      "korku:step2",
+      "korku:step3",
+      "korku:step4"
+    ]
+  },
+  "monster.walk": {
+    "sounds": [
+      "korku:walk_approach"
+    ]
+  }
+}
