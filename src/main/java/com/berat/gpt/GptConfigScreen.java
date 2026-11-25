@@ -64,7 +64,7 @@ public class GptConfigScreen extends Screen {
         keyBox = new EditBox(this.font, x, y, w, h, c(t("gui.apikey")));
         keyBox.setMaxLength(300);
         keyBox.setValue(GptConfig.key());
-        keyBox.addFormatter((s, i) -> FormattedCharSequence.forward("*".repeat(s.length()), Style.EMPTY));
+        keyBox.setFormatter((s, i) -> FormattedCharSequence.forward("*".repeat(s.length()), Style.EMPTY));
         keyBox.setHint(c(t("gui.apikey")));
         keyBox.setTooltip(Tooltip.create(c(t("tip.apikey"))));
         this.addRenderableWidget(keyBox);
