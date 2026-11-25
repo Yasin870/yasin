@@ -1,0 +1,39 @@
+
+name: DroidFPS Mod Builder
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'droidfps-mod.zip'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Extract project
+        run: |
+          mkdir project
+          unzip -q droidfps-mod.zip -d project
+
+      - name: Build mod
+        run: |
+          cd project
+          chmod +x gradlew
+          ./gradlew build --no-daemon
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: DroidFPS-Mod
+          path: project/**/build/libs/*.jar
