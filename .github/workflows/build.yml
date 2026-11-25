@@ -27,23 +27,26 @@ jobs:
           mkdir -p project
           unzip -q droidfps-mod.zip -d project
 
-      - name: Find and build Gradle project
-        run: |
-          GRADLEW=$(find project -type f -name gradlew | head -n 1)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
 
-          if [ -z "$GRADLEW" ]; then
-            echo "HATA: ZIP içinde gradlew bulunamadı!"
-            echo "ZIP içindeki dosyalar:"
-            find project -maxdepth 5 -type f | head -200
+      - name: Build mod
+        run: |
+          BUILD_FILE=$(find project -type f \( -name build.gradle -o -name build.gradle.kts \) | head -n 1)
+
+          if [ -z "$BUILD_FILE" ]; then
+            echo "HATA: Gradle build dosyası bulunamadı!"
+            find project -maxdepth 5 -type f
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$GRADLEW")
-          echo "Gradle projesi bulundu: $PROJECT_DIR"
+          PROJECT_DIR=$(dirname "$BUILD_FILE")
+          echo "Proje klasörü: $PROJECT_DIR"
 
           cd "$PROJECT_DIR"
-          chmod +x gradlew
-          ./gradlew build --no-daemon
+          gradle build --no-daemon
 
       - name: Upload compiled JAR
         uses: actions/upload-artifact@v4
