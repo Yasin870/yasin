@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "custommenu",
+  "version": "1.0.0",
+  "name": "Custom Menu",
+  "description": "Minecraft menülerini kendi fotoğraf, video, GIF ve müziklerinle kişiselleştir!",
+  "icon": "assets/custommenu/icon.png",
+  "environment": "client",
+  "license": "MIT"
+}
