@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="minecraftgpt"
+version="0.1.0"
+displayName="Minecraft GPT"
+description='''Minecraft GPT: yapay zekali hikaye ve korku modu / AI-driven story and horror mod. Asama 1 / Phase 1.'''
+displayTest="IGNORE_SERVER_VERSION"
+
+[[dependencies.minecraftgpt]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.minecraftgpt]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
+side="BOTH"
