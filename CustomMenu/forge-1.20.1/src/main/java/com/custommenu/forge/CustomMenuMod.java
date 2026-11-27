@@ -64,7 +64,7 @@ public class CustomMenuMod {
 
     /** Pikselleri doğrudan belleğe kopyalar (piksel piksel yazmaktan çok daha hızlı). */
     private static void copyPixels(NativeImage px, int[] data, int w, int h) {
-        MemoryUtil.memIntBuffer(px.getPointer(), w * h).put(data, 0, w * h);
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) px.setPixelRGBA(x, y, data[y * w + x]);
     }
 
     private static void releaseTexture() {
