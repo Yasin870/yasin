@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "droidfps",
+  "version": "${version}",
+  "name": "DroidFPS",
+  "description": "Android (PojavLauncher / Zalith / Amethyst) ve dusuk sistemler icin dinamik FPS optimizasyon modu.",
+  "authors": [
+    "DroidFPS"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.droidfps.DroidFps"
+    ]
+  },
+  "mixins": [
+    "droidfps.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.14.21",
+    "minecraft": "~1.20.1",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}
