@@ -34,7 +34,7 @@ public class ScreenSettingsScreen extends Screen {
 
         addRenderableWidget(new AbstractSliderButton(rx, y, w, 20, Component.literal("Ses seviyesi: " + Math.round(s.volume * 100) + "%"), s.volume) {
             @Override protected void updateMessage() { setMessage(Component.literal("Ses seviyesi: " + Math.round(value * 100) + "%")); }
-            @Override protected void applyValue() { s.volume = (float) value; CustomMenuMod.CONFIG.save(); }
+            @Override protected void applyValue() { s.volume = (float) value; CustomMenuMod.CONFIG.save(); AudioPlayer.setVolume(s.volume); }
         });
         addRenderableWidget(Button.builder(Component.literal("Görsel/video seç"), b ->
                 minecraft.setScreen(new FileBrowserScreen(this, type, false, f -> { s.mediaPath = f.getAbsolutePath(); CustomMenuMod.applyAndSave(); }))
@@ -47,6 +47,11 @@ public class ScreenSettingsScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Bu ekranı sıfırla"), b -> {
             CustomMenuMod.CONFIG.screens.put(type, new ScreenSettings()); CustomMenuMod.applyAndSave(); minecraft.setScreen(new ScreenSettingsScreen(parent, type));
         }).bounds(rx, y + step * 4, w, 20).build());
+        addRenderableWidget(Button.builder(Component.literal(AudioPlayer.isActive(s.audioPath) ? "Müziği durdur" : "Müzik dene"), b -> {
+            if (s.audioPath.isEmpty()) { AudioPlayer.status = "Önce müzik seç"; return; }
+            if (AudioPlayer.isActive(s.audioPath)) AudioPlayer.stop(); else AudioPlayer.update(s.audioPath, s.volume, s.loop);
+            rebuildWidgets();
+        }).bounds(lx, y + step * 5, w, 20).build());
         if (type == ScreenType.INTRO)
             addRenderableWidget(Button.builder(Component.literal("Önizle"), b -> minecraft.setScreen(new IntroScreen(this)))
                     .bounds(rx, y + step * 5, w, 20).build());
@@ -57,11 +62,10 @@ public class ScreenSettingsScreen extends Screen {
         renderBackground(g);
         g.drawCenteredString(font, title, width / 2, 14, 0xFFFFFF);
         super.render(g, mx, my, pt);
-        int y = 34 + 24 * 5 + 6 + (type == ScreenType.INTRO ? 24 : 0);
+        int y = 34 + 24 * 6 + 6;
         g.drawCenteredString(font, Component.literal("Görsel: " + name(s.mediaPath)), width / 2, y, 0xAAAAAA);
         g.drawCenteredString(font, Component.literal("Müzik: " + name(s.audioPath)), width / 2, y + 12, 0xAAAAAA);
-        g.drawCenteredString(font, Component.literal("Görsel durumu: " + font.plainSubstrByWidth(CustomMenuMod.mediaStatus, width - 130)), width / 2, y + 26, 0x88CCFF);
-        g.drawCenteredString(font, Component.literal(font.plainSubstrByWidth(AudioPlayer.status, width - 40)), width / 2, y + 38, 0x88CCFF);
+        g.drawCenteredString(font, Component.literal(font.plainSubstrByWidth("Görsel: " + CustomMenuMod.mediaStatus + "  |  " + AudioPlayer.status, width - 16)), width / 2, y + 24, 0x88CCFF);
     }
     private String name(String p) {
         if (p.isEmpty()) return "(yok)";

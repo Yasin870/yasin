@@ -19,9 +19,12 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.fml.loading.FMLPaths;
+import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.lang.reflect.Field;
@@ -57,6 +60,11 @@ public class CustomMenuMod {
         pendingPng.set(null); pendingGif.set(null);
         AudioPlayer.stop();
         CONFIG.load();
+    }
+
+    /** Pikselleri doğrudan belleğe kopyalar (piksel piksel yazmaktan çok daha hızlı). */
+    private static void copyPixels(NativeImage px, int[] data, int w, int h) {
+        MemoryUtil.memIntBuffer(px.getPointer(), w * h).put(data, 0, w * h);
     }
 
     private static void releaseTexture() {
@@ -96,14 +104,17 @@ public class CustomMenuMod {
             try {
                 NativeImage img = NativeImage.read(new ByteArrayInputStream(png));
                 texW = img.getWidth(); texH = img.getHeight(); anim = null; dyn = null;
-                tex = mc.getTextureManager().register("custommenu_img", new DynamicTexture(img));
-                mediaStatus = "Görsel hazır";
+                DynamicTexture dt = new DynamicTexture(img);
+                dt.setFilter(true, false); // yumuşak ölçekleme (kalite)
+                tex = mc.getTextureManager().register("custommenu_img", dt);
+                mediaStatus = "Görsel hazır (" + texW + "x" + texH + ")";
             } catch (Throwable t) { fail("Görsel hatası", t); }
         }
         GifAnim g = pendingGif.getAndSet(null);
         if (g != null) {
             try {
                 dyn = new DynamicTexture(g.w, g.h, false);
+                dyn.setFilter(true, false);
                 texW = g.w; texH = g.h; anim = g; animStart = System.currentTimeMillis(); shownFrame = -1;
                 tex = mc.getTextureManager().register("custommenu_img", dyn);
                 mediaStatus = "GIF hazır (" + g.frames.length + " kare)";
@@ -116,15 +127,13 @@ public class CustomMenuMod {
                 try {
                     if (dyn == null || texW != f.w || texH != f.h) {
                         dyn = new DynamicTexture(f.w, f.h, false);
+                        dyn.setFilter(true, false);
                         texW = f.w; texH = f.h; anim = null;
                         tex = mc.getTextureManager().register("custommenu_img", dyn);
                     }
                     NativeImage px = dyn.getPixels();
-                    if (px != null) {
-                        for (int y = 0; y < f.h; y++) for (int x = 0; x < f.w; x++) px.setPixelRGBA(x, y, f.abgr[y * f.w + x]);
-                        dyn.upload();
-                    }
-                    mediaStatus = "Video oynuyor";
+                    if (px != null) { copyPixels(px, f.abgr, f.w, f.h); dyn.upload(); }
+                    mediaStatus = "Video oynuyor (" + f.w + "x" + f.h + ", " + Math.round(v.fpsInfo) + " fps)";
                 } catch (Throwable t) { fail("Video hatası", t); }
             }
             if (v.failed) { mediaStatus = "Video hatası: " + v.error; }
@@ -137,16 +146,25 @@ public class CustomMenuMod {
             MediaKind kind = MediaKind.detect(file.getName());
             mediaStatus = "Yükleniyor...";
             if (kind == MediaKind.VIDEO) {
-                video = new VideoDecoder(file, loop, 480);
+                video = new VideoDecoder(file, loop, 0); // orijinal çözünürlük
                 Thread t = new Thread(video, "CustomMenu-Video"); t.setDaemon(true); t.start();
             } else {
                 loading = true;
                 Thread t = new Thread(() -> {
                     try {
-                        if (kind == MediaKind.GIF) pendingGif.set(GifAnim.load(file, 480, 48_000_000L));
+                        if (kind == MediaKind.GIF) pendingGif.set(GifAnim.load(file, 720, 64_000_000L));
                         else {
                             BufferedImage bi = ImageIO.read(file);
                             if (bi == null) throw new IllegalStateException("Görsel okunamadı");
+                            int big = Math.max(bi.getWidth(), bi.getHeight());
+                            if (big > 2560) { // çok büyük fotoğrafları hafif küçült (bellek)
+                                float sc = 2560f / big;
+                                BufferedImage o = new BufferedImage(Math.round(bi.getWidth() * sc), Math.round(bi.getHeight() * sc), BufferedImage.TYPE_INT_ARGB);
+                                Graphics2D gg = o.createGraphics();
+                                gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                                gg.drawImage(bi, 0, 0, o.getWidth(), o.getHeight(), null); gg.dispose();
+                                bi = o;
+                            }
                             ByteArrayOutputStream bo = new ByteArrayOutputStream();
                             ImageIO.write(bi, "png", bo);
                             pendingPng.set(bo.toByteArray());
@@ -167,10 +185,7 @@ public class CustomMenuMod {
             if (idx != shownFrame) {
                 NativeImage px = dyn.getPixels();
                 int[] fr = anim.frames[idx];
-                if (px != null) {
-                    for (int y = 0; y < anim.h; y++) for (int x = 0; x < anim.w; x++) px.setPixelRGBA(x, y, fr[y * anim.w + x]);
-                    dyn.upload();
-                }
+                if (px != null) { copyPixels(px, fr, anim.w, anim.h); dyn.upload(); }
                 shownFrame = idx;
             }
         }
@@ -261,7 +276,9 @@ public class CustomMenuMod {
         public void onTick(TickEvent.ClientTickEvent e) {
             if (e.phase != TickEvent.Phase.END) return;
             String path = ""; float vol = 1f; boolean loop = true;
-            ScreenType t = typeOf(Minecraft.getInstance().screen);
+            Screen cur = Minecraft.getInstance().screen;
+            if (cur instanceof CustomMenuScreen || cur instanceof ScreenSettingsScreen || cur instanceof FileBrowserScreen) return; // ayarlarda müzik sürsün/test edilebilsin
+            ScreenType t = typeOf(cur);
             if (t != null && CONFIG.enabled) {
                 ScreenSettings s = CONFIG.get(t);
                 if (s.enabled && s.playSound && !s.audioPath.isEmpty()) {
