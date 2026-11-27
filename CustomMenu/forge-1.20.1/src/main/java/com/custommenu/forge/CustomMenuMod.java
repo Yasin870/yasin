@@ -2,6 +2,7 @@ package com.custommenu.forge;
 
 import com.custommenu.core.*;
 import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -18,6 +19,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.fml.loading.FMLPaths;
+import org.slf4j.Logger;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -27,14 +29,18 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Mod("custommenu")
 public class CustomMenuMod {
+    static final Logger LOG = LogUtils.getLogger();
     public static final CustomMenuConfig CONFIG = new CustomMenuConfig(FMLPaths.CONFIGDIR.get());
+    public static volatile String mediaStatus = "";
 
-    // ---- görsel durumu (render thread) ----
+    // ---- görsel durumu ----
     private static final AtomicReference<byte[]> pendingPng = new AtomicReference<>();
     private static final AtomicReference<GifAnim> pendingGif = new AtomicReference<>();
     private static ResourceLocation tex; private static int texW, texH;
     private static DynamicTexture dyn; private static GifAnim anim; private static long animStart; private static int shownFrame = -1;
+    private static VideoDecoder video;
     private static String loadedPath = ""; private static volatile boolean loading;
+    private static boolean introHandled = false;
 
     public CustomMenuMod() {
         CONFIG.load();
@@ -46,17 +52,22 @@ public class CustomMenuMod {
 
     /** Yeniden başlatmadan uygula. */
     public static void reload() {
-        try {
-            Minecraft mc = Minecraft.getInstance();
-            if (tex != null) mc.getTextureManager().release(tex);
-        } catch (Throwable ignored) { }
-        tex = null; dyn = null; anim = null; shownFrame = -1; loadedPath = "";
+        releaseTexture(); stopVideo();
+        loadedPath = ""; mediaStatus = "";
         pendingPng.set(null); pendingGif.set(null);
         AudioPlayer.stop();
         CONFIG.load();
     }
 
+    private static void releaseTexture() {
+        try { if (tex != null) Minecraft.getInstance().getTextureManager().release(tex); } catch (Throwable ignored) { }
+        tex = null; dyn = null; anim = null; shownFrame = -1;
+    }
+    private static void stopVideo() { if (video != null) { video.stop(); video = null; } }
+    private static void fail(String what, Throwable t) { LOG.warn("CustomMenu: " + what, t); mediaStatus = what + ": " + t; }
+
     static ScreenType typeOf(Screen sc) {
+        if (sc instanceof IntroScreen) return ScreenType.INTRO;
         if (sc instanceof TitleScreen) return ScreenType.MAINMENU;
         if (sc instanceof PauseScreen) return ScreenType.PAUSE;
         if (sc instanceof WinScreen) return ScreenType.GAMEOVER; // Ender ejderhası sonrası bitiş/kredi ekranı
@@ -70,8 +81,15 @@ public class CustomMenuMod {
         return (s.enabled && s.showMedia && !s.mediaPath.isEmpty()) ? s : null;
     }
 
-    /** Görseli (gerekirse) yükler; çizilebilir hale geldiyse true. */
-    static boolean prepare(String path) {
+    static boolean isMotion() { return video != null || anim != null; }
+    static boolean mediaFinished() {
+        if (video != null) return video.finished || video.failed;
+        if (anim != null) return System.currentTimeMillis() - animStart >= anim.total;
+        return false;
+    }
+
+    /** Görseli/GIF'i/videoyu (gerekirse) yükler; çizilebilir hale geldiyse true. Render thread'den çağrılmalı. */
+    static boolean prepare(String path, boolean loop) {
         Minecraft mc = Minecraft.getInstance();
         byte[] png = pendingPng.getAndSet(null);
         if (png != null) {
@@ -79,7 +97,8 @@ public class CustomMenuMod {
                 NativeImage img = NativeImage.read(new ByteArrayInputStream(png));
                 texW = img.getWidth(); texH = img.getHeight(); anim = null; dyn = null;
                 tex = mc.getTextureManager().register("custommenu_img", new DynamicTexture(img));
-            } catch (Throwable ignored) { }
+                mediaStatus = "Görsel hazır";
+            } catch (Throwable t) { fail("Görsel hatası", t); }
         }
         GifAnim g = pendingGif.getAndSet(null);
         if (g != null) {
@@ -87,32 +106,62 @@ public class CustomMenuMod {
                 dyn = new DynamicTexture(g.w, g.h, false);
                 texW = g.w; texH = g.h; anim = g; animStart = System.currentTimeMillis(); shownFrame = -1;
                 tex = mc.getTextureManager().register("custommenu_img", dyn);
-            } catch (Throwable ignored) { }
+                mediaStatus = "GIF hazır (" + g.frames.length + " kare)";
+            } catch (Throwable t) { fail("GIF hatası", t); }
+        }
+        VideoDecoder v = video;
+        if (v != null) {
+            VideoDecoder.Frame f = v.latest.getAndSet(null);
+            if (f != null) {
+                try {
+                    if (dyn == null || texW != f.w || texH != f.h) {
+                        dyn = new DynamicTexture(f.w, f.h, false);
+                        texW = f.w; texH = f.h; anim = null;
+                        tex = mc.getTextureManager().register("custommenu_img", dyn);
+                    }
+                    NativeImage px = dyn.getPixels();
+                    if (px != null) {
+                        for (int y = 0; y < f.h; y++) for (int x = 0; x < f.w; x++) px.setPixelRGBA(x, y, f.abgr[y * f.w + x]);
+                        dyn.upload();
+                    }
+                    mediaStatus = "Video oynuyor";
+                } catch (Throwable t) { fail("Video hatası", t); }
+            }
+            if (v.failed) { mediaStatus = "Video hatası: " + v.error; }
         }
         if (!path.equals(loadedPath) && !loading) {
-            loading = true; loadedPath = path;
-            Thread t = new Thread(() -> {
-                try {
-                    File f = new File(path);
-                    if (MediaKind.detect(f.getName()) == MediaKind.GIF) {
-                        pendingGif.set(GifAnim.load(f, 480, 48_000_000L));
-                    } else {
-                        BufferedImage bi = ImageIO.read(f);
-                        if (bi != null) {
+            loadedPath = path;
+            releaseTexture(); stopVideo();
+            File file = new File(path);
+            if (!file.isFile()) { mediaStatus = "Dosya bulunamadı"; return false; }
+            MediaKind kind = MediaKind.detect(file.getName());
+            mediaStatus = "Yükleniyor...";
+            if (kind == MediaKind.VIDEO) {
+                video = new VideoDecoder(file, loop, 480);
+                Thread t = new Thread(video, "CustomMenu-Video"); t.setDaemon(true); t.start();
+            } else {
+                loading = true;
+                Thread t = new Thread(() -> {
+                    try {
+                        if (kind == MediaKind.GIF) pendingGif.set(GifAnim.load(file, 480, 48_000_000L));
+                        else {
+                            BufferedImage bi = ImageIO.read(file);
+                            if (bi == null) throw new IllegalStateException("Görsel okunamadı");
                             ByteArrayOutputStream bo = new ByteArrayOutputStream();
                             ImageIO.write(bi, "png", bo);
                             pendingPng.set(bo.toByteArray());
                         }
-                    }
-                } catch (Throwable ignored) { /* bozuk dosya çökertmez */ }
-                loading = false;
-            }, "CustomMenu-Loader");
-            t.setDaemon(true); t.start();
+                    } catch (Throwable ex) { fail("Görsel yüklenemedi", ex); }
+                    loading = false;
+                }, "CustomMenu-Loader");
+                t.setDaemon(true); t.start();
+            }
         }
         return tex != null;
     }
 
     static void drawMedia(GuiGraphics g, ScreenSettings s, int sw, int sh) {
+        if (tex == null) return;
         if (anim != null && dyn != null) {
             int idx = anim.frameAt(System.currentTimeMillis() - animStart, s.loop);
             if (idx != shownFrame) {
@@ -139,19 +188,27 @@ public class CustomMenuMod {
         @Override public void render(float partialTick, float alpha) {
             try {
                 ScreenSettings s = activeMedia(ScreenType.MAINMENU);
-                if (s != null && prepare(s.mediaPath)) {
+                if (s != null && prepare(s.mediaPath, s.loop)) {
                     Minecraft mc = Minecraft.getInstance();
                     GuiGraphics g = new GuiGraphics(mc, mc.renderBuffers().bufferSource());
                     drawMedia(g, s, mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
                     g.flush();
                     return;
                 }
-            } catch (Throwable ignored) { }
+            } catch (Throwable t) { LOG.warn("CustomMenu: ana menü çizim hatası", t); }
             orig.render(partialTick, alpha);
         }
     }
 
     static class Client {
+        @SubscribeEvent
+        public void onOpening(ScreenEvent.Opening e) { // intro: oyun açılışında ana menüden önce
+            if (!introHandled && e.getNewScreen() instanceof TitleScreen) {
+                introHandled = true;
+                if (activeMedia(ScreenType.INTRO) != null) e.setNewScreen(new IntroScreen(e.getNewScreen()));
+            }
+        }
+
         @SubscribeEvent
         public void onInit(ScreenEvent.Init.Post e) {
             Screen s = e.getScreen();
@@ -160,27 +217,43 @@ public class CustomMenuMod {
                         b -> Minecraft.getInstance().setScreen(new CustomMenuScreen(s))).bounds(4, 4, 90, 20).build());
             if (s instanceof TitleScreen) {
                 try {
+                    boolean found = false;
                     for (Field f : TitleScreen.class.getDeclaredFields()) {
                         if (f.getType() == PanoramaRenderer.class) {
                             f.setAccessible(true);
                             Object cur = f.get(s);
                             if (!(cur instanceof MediaPanorama)) f.set(s, new MediaPanorama((PanoramaRenderer) cur));
+                            found = true;
                         }
                     }
-                } catch (Throwable ignored) { }
+                    if (!found) LOG.warn("CustomMenu: panorama alanı bulunamadı, ana menü görseli çizilemez");
+                } catch (Throwable t) { LOG.warn("CustomMenu: panorama değiştirilemedi", t); }
             }
         }
 
-        /** ESC ve bitiş ekranı: ekranın arkasına çiz. (Ana menü MediaPanorama ile çizilir.) */
+        /** ESC menüsü: ekranın arkasına çiz. */
         @SubscribeEvent
         public void onRender(ScreenEvent.Render.Pre e) {
             try {
-                ScreenType t = typeOf(e.getScreen());
-                if (t == null || t == ScreenType.MAINMENU) return;
-                ScreenSettings s = activeMedia(t);
-                if (s == null || !prepare(s.mediaPath)) return;
+                if (!(e.getScreen() instanceof PauseScreen)) return;
+                ScreenSettings s = activeMedia(ScreenType.PAUSE);
+                if (s == null || !prepare(s.mediaPath, s.loop)) return;
                 drawMedia(e.getGuiGraphics(), s, e.getScreen().width, e.getScreen().height);
-            } catch (Throwable ignored) { }
+            } catch (Throwable t) { LOG.warn("CustomMenu: ESC çizim hatası", t); }
+        }
+
+        /** Bitiş/kredi ekranı kendi opak arka planını çiziyor; bu yüzden görsel yazıların üstüne yarı saydam çizilir. */
+        @SubscribeEvent
+        public void onRenderPost(ScreenEvent.Render.Post e) {
+            try {
+                if (!(e.getScreen() instanceof WinScreen)) return;
+                ScreenSettings s = activeMedia(ScreenType.GAMEOVER);
+                if (s == null || !prepare(s.mediaPath, s.loop)) return;
+                GuiGraphics g = e.getGuiGraphics();
+                g.setColor(1f, 1f, 1f, 0.45f);
+                drawMedia(g, s, e.getScreen().width, e.getScreen().height);
+                g.setColor(1f, 1f, 1f, 1f);
+            } catch (Throwable t) { LOG.warn("CustomMenu: bitiş ekranı çizim hatası", t); }
         }
 
         /** Müzik: ilgili ekran açıkken çal, ekran kapanınca durdur. */
@@ -191,7 +264,9 @@ public class CustomMenuMod {
             ScreenType t = typeOf(Minecraft.getInstance().screen);
             if (t != null && CONFIG.enabled) {
                 ScreenSettings s = CONFIG.get(t);
-                if (s.enabled && s.playSound && !s.audioPath.isEmpty()) { path = s.audioPath; vol = s.volume; loop = s.loop; }
+                if (s.enabled && s.playSound && !s.audioPath.isEmpty()) {
+                    path = s.audioPath; vol = s.volume; loop = s.loop && t != ScreenType.INTRO;
+                }
             }
             AudioPlayer.update(path, vol, loop);
         }

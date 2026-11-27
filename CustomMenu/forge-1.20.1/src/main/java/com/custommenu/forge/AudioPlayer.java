@@ -7,6 +7,9 @@ import javazoom.jl.decoder.SampleBuffer;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.openal.AL10;
 
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.nio.ShortBuffer;
@@ -20,6 +23,9 @@ public final class AudioPlayer {
         final String key; final short[] pcm; final int rate, ch;
         Decoded(String k, short[] p, int r, int c) { key = k; pcm = p; rate = r; ch = c; }
     }
+    private static final Logger LOG = LogUtils.getLogger();
+    public static volatile String status = "";
+    private static volatile String failedKey = "";
     private static final AtomicReference<Decoded> ready = new AtomicReference<>();
     private static volatile int generation = 0;
     private static String key = "";
@@ -30,7 +36,9 @@ public final class AudioPlayer {
     /** path boşsa durdurur. Aynı yol tekrar gelirse sadece ses seviyesini günceller. */
     public static void update(String path, float volume, boolean loop) {
         try {
-            if (path.isEmpty()) { if (!key.isEmpty()) stop(); return; }
+            if (path.isEmpty()) { if (!key.isEmpty()) stop(); status = ""; failedKey = ""; return; }
+            if (path.equals(failedKey)) return;
+            failedKey = "";
             if (!path.equals(key)) { stop(); key = path; startDecode(path); }
             if (source != 0) {
                 AL10.alSourcef(source, AL10.AL_GAIN, volume);
@@ -39,7 +47,11 @@ public final class AudioPlayer {
                 Decoded d = ready.get();
                 if (d != null && d.key.equals(key)) play(d, volume, loop);
             }
-        } catch (Throwable t) { key = ""; }
+        } catch (Throwable t) {
+            LOG.warn("CustomMenu: müzik hatası", t);
+            status = "Müzik hatası: " + t;
+            String k = path; stop(); failedKey = k;
+        }
     }
 
     private static void play(Decoded d, float volume, boolean loop) {
@@ -53,6 +65,7 @@ public final class AudioPlayer {
         AL10.alSourcef(source, AL10.AL_GAIN, volume);
         AL10.alSourcei(source, AL10.AL_LOOPING, loop ? 1 : 0);
         AL10.alSourcePlay(source);
+        status = "Müzik çalıyor";
     }
 
     public static void stop() {
@@ -80,10 +93,15 @@ public final class AudioPlayer {
                     System.arraycopy(sb.getBuffer(), 0, out, len, n); len += n;
                     bs.closeFrame();
                 }
+                if (gen == generation && len == 0) { status = "Müzik hatası: MP3'ten ses çıkmadı"; failedKey = k; }
                 if (gen == generation && len > 0)
                     ready.set(new Decoded(k, java.util.Arrays.copyOf(out, len), dec.getOutputFrequency(), dec.getOutputChannels()));
-            } catch (Throwable ignored) { /* bozuk MP3 oyunu çökertmez */ }
+            } catch (Throwable ex) { /* bozuk MP3 oyunu çökertmez */
+                LOG.warn("CustomMenu: MP3 çözülemedi", ex);
+                status = "Müzik hatası: " + ex; failedKey = k;
+            }
         }, "CustomMenu-Mp3");
         t.setDaemon(true); t.start();
+        status = "Müzik yükleniyor...";
     }
 }

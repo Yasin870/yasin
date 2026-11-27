@@ -13,8 +13,11 @@ configurations { shade }
 repositories { mavenCentral() }
 dependencies {
     minecraft 'net.minecraftforge:forge:1.20.1-47.3.0'
-    implementation 'javazoom:jlayer:1.0.1'   // MP3 çözücü
-    shade 'javazoom:jlayer:1.0.1'
+    // MP3 (jlayer) ve MP4 (jcodec) çözücüler; mod JAR'ının içine gömülür
+    ['javazoom:jlayer:1.0.1', 'org.jcodec:jcodec:0.2.5', 'org.jcodec:jcodec-javase:0.2.5'].each { lib ->
+        implementation lib
+        shade lib
+    }
 }
 
 // MP3 kütüphanesini mod JAR'ının içine göm
