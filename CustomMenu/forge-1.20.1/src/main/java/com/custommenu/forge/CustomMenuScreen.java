@@ -19,7 +19,7 @@ public class CustomMenuScreen extends Screen {
             CustomMenuMod.CONFIG.enabled = !CustomMenuMod.CONFIG.enabled;
             CustomMenuMod.applyAndSave(); rebuildWidgets();
         }).bounds(x, y, 200, 20).build());
-        String[] names = {"Intro ekranı", "Ana menü", "Duraklatma menüsü (ESC)", "Game Over ekranı"};
+        String[] names = {"Intro ekranı", "Ana menü", "Duraklatma menüsü (ESC)", "Bitiş / kredi ekranı"};
         for (ScreenType t : ScreenType.values()) {
             y += 26;
             ScreenSettings s = CustomMenuMod.CONFIG.get(t);
